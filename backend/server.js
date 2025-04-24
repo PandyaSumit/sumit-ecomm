@@ -52,28 +52,6 @@ app.use('/api/v1/profile', profileRoutes);
 app.use('/api/v1/payment', paymentRoutes);
 app.use('/api/v1/course', courseRoutes);
 
-app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-    const sig = req.headers['stripe-signature'];
-    let event;
-
-    try {
-        event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-    } catch (err) {
-        console.log("Webhook signature verification failed:", err.message);
-        return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-
-    if (event.type === 'payment_intent.succeeded') {
-        const paymentIntent = event.data.object;
-
-        const courses = JSON.parse(paymentIntent.metadata.coursesId);
-        const userId = paymentIntent.metadata.userId;
-
-        await enrollStudents(courses, userId, res);
-    }
-
-    res.status(200).json({ received: true });
-});
 
 
 

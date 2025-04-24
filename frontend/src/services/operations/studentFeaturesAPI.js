@@ -4,10 +4,9 @@ import { apiConnector } from "../apiConnector";
 import rzpLogo from "../../assets/Logo/rzp_logo.png"
 import { setPaymentLoading } from "../../slices/courseSlice";
 import { resetCart } from "../../slices/cartSlice";
-import { loadStripe } from "@stripe/stripe-js";
+
 
 const { COURSE_PAYMENT_API, COURSE_VERIFY_API, SEND_PAYMENT_SUCCESS_EMAIL_API } = studentEndpoints;
-const stripePromise = loadStripe(import.meta.env.VITE_APP_STRIPE_PUBLISHABLE_KEY);
 
 function loadScript(src) {
     return new Promise((resolve) => {
@@ -26,35 +25,68 @@ function loadScript(src) {
 
 // ================ buyCourse ================ 
 export async function buyCourse(token, coursesId, userDetails, navigate, dispatch) {
-    const toastId = toast.loading("Redirecting to Checkout...");
+    const toastId = toast.loading("Loading...");
+
     try {
-        const stripe = await stripePromise;
+        //load the script
+        const res = await loadScript("https://checkout.razorpay.com/v1/checkout.js");
 
-        // Step 1: Create Stripe Checkout Session on backend
-        const sessionResponse = await apiConnector("POST", COURSE_PAYMENT_API, { coursesId }, {
-            Authorization: `Bearer ${token}`,
-        });
-
-        if (!sessionResponse?.data?.success) {
-            throw new Error(sessionResponse.data.message || "Unable to initiate payment");
+        if (!res) {
+            toast.error("RazorPay SDK failed to load");
+            return;
         }
 
-        const sessionId = sessionResponse.data.sessionId;
-
-        // Step 2: Redirect to Stripe Checkout
-        const result = await stripe.redirectToCheckout({
-            sessionId: sessionId,
-        });
-
-        if (result.error) {
-            toast.error(result.error.message);
+        // initiate the order
+        const orderResponse = await apiConnector("POST", COURSE_PAYMENT_API,
+            { coursesId },
+            {
+                Authorization: `Bearer ${token}`,
+            })
+        // console.log("orderResponse... ", orderResponse);
+        if (!orderResponse.data.success) {
+            throw new Error(orderResponse.data.message);
         }
-    } catch (error) {
-        console.error("Stripe buyCourse error:", error);
-        toast.error(error.message || "Failed to initiate payment");
+
+        const RAZORPAY_KEY = import.meta.env.VITE_APP_RAZORPAY_KEY;
+        // console.log("RAZORPAY_KEY...", RAZORPAY_KEY);
+
+        // options
+        const options = {
+            key: RAZORPAY_KEY,
+            currency: orderResponse.data.message.currency,
+            amount: orderResponse.data.message.amount,
+            order_id: orderResponse.data.message.id,
+            name: "StudyNotion",
+            description: "Thank You for Purchasing the Course",
+            image: rzpLogo,
+            prefill: {
+                name: userDetails.firstName,
+                email: userDetails.email
+            },
+            handler: function (response) {
+                //send successful mail
+                sendPaymentSuccessEmail(response, orderResponse.data.message.amount, token);
+                //verifyPayment
+                verifyPayment({ ...response, coursesId }, token, navigate, dispatch);
+            }
+        }
+
+        const paymentObject = new window.Razorpay(options);
+        paymentObject.open();
+        paymentObject.on("payment.failed", function (response) {
+            toast.error("oops, payment failed");
+            console.log("payment failed.... ", response.error);
+        })
+
+    }
+    catch (error) {
+        console.log("PAYMENT API ERROR.....", error);
+        toast.error(error.response?.data?.message);
+        // toast.error("Could not make Payment");
     }
     toast.dismiss(toastId);
 }
+
 
 // ================ send Payment Success Email ================
 async function sendPaymentSuccessEmail(response, amount, token) {
