@@ -87,7 +87,6 @@ export async function buyCourse(token, coursesId, userDetails, navigate, dispatc
     toast.dismiss(toastId);
 }
 
-
 // ================ send Payment Success Email ================
 async function sendPaymentSuccessEmail(response, amount, token) {
     try {
